@@ -1,0 +1,607 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  PUBLIC
+  FIELD_RESEARCHER
+  EDITOR
+  SENIOR_EDITOR
+  EDITOR_IN_CHIEF
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+  FACEBOOK
+  INSTAGRAM
+  TWITTER
+}
+
+enum WordStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  PUBLISHED
+}
+
+enum WorkflowStage {
+  FIELD_RESEARCH
+  EDITOR_REVIEW
+  SENIOR_EDITOR_REVIEW
+  EDITOR_IN_CHIEF_REVIEW
+  ADMIN_REVIEW
+  APPROVED
+}
+
+enum WorkflowStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  RETURNED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ParameterType {
+  TEXT
+  RICH_TEXT
+  JSON
+  ARRAY
+  MULTILINGUAL
+}
+
+enum RelationshipType {
+  SEE_ALSO
+  SYNONYM
+  ANTONYM
+  RELATED
+  DERIVED_FROM
+  COMPOUND_OF
+  VARIANT_OF
+}
+
+enum EditSuggestionType {
+  EDIT_EXISTING
+  ADD_NEW_WORD
+}
+
+enum EditSuggestionStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum AssignmentType {
+  INITIAL
+  TRANSFER
+  REVIEW
+  EDIT_SUGGESTION_REVIEW
+}
+
+enum AssignmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ExportType {
+  POCKET
+  CONCISE
+  VOLUME
+  DESCRIPTIVE
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ActionType {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  TRANSFER
+  EXPORT
+  SEARCH
+  VIEW
+  EDIT_SUGGESTION
+}
+
+enum ParameterEditPermission {
+  ALL
+  ADMIN_ONLY
+  SUPER_ADMIN_ONLY
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String?      @unique
+  passwordHash  String?      @map("password_hash")
+  fullName      String?      @map("full_name")
+  phone         String?
+  role          UserRole     @default(PUBLIC)
+  isActive      Boolean      @default(true) @map("is_active")
+  authProvider  AuthProvider @default(EMAIL) @map("auth_provider")
+  providerId    String?      @map("provider_id")
+  avatarUrl     String?      @map("avatar_url")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  lastLogin     DateTime?    @map("last_login")
+
+  // Relations
+  contributions      Word[]              @relation("WordContributor")
+  approvedWords       Word[]              @relation("WordApprover")
+  assignedWorkflows   WordWorkflow[]      @relation("WorkflowAssignee")
+  createdWorkflows    WordWorkflow[]      @relation("WorkflowCreator")
+  wordRevisions       WordRevision[]
+  workAssignments     WorkAssignment[]    @relation("AssignmentAssignee")
+  createdAssignments  WorkAssignment[]    @relation("AssignmentCreator")
+  wordTransfersFrom   WordTransfer[]      @relation("TransferFrom")
+  wordTransfersTo     WordTransfer[]      @relation("TransferTo")
+  reviewedSuggestions EditSuggestion[]
+  pdfExports          PdfExport[]
+  favorites           UserFavorite[]
+  notes               UserNote[]
+  searchHistory       SearchHistory[]
+  auditLogs           AuditLog[]
+
+  // NextAuth relations
+  accounts Account[]
+  sessions Session[]
+
+  @@map("users")
+}
+
+// NextAuth required models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Dictionary {
+  id            String   @id @default(cuid())
+  name          String
+  nameMaithili  String?  @map("name_maithili")
+  sourceLanguage String  @default("maithili") @map("source_language")
+  targetLanguages Json   @map("target_languages") // Array of strings
+  isMain        Boolean  @default(false) @map("is_main")
+  isActive      Boolean  @default(true) @map("is_active")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  words           Word[]
+  editSuggestions EditSuggestion[]
+  searchSuggestions SearchSuggestion[]
+  searchHistory   SearchHistory[]
+  pdfExports      PdfExport[]
+  columnDefinitions DictionaryColumnDefinition[]
+
+  @@map("dictionaries")
+}
+
+model DictionaryColumnDefinition {
+  id              String   @id @default(cuid())
+  dictionaryId    String   @map("dictionary_id")
+  columnName      String   @map("column_name")
+  columnNameMaithili String? @map("column_name_maithili")
+  fieldMapping    String   @map("field_mapping") // Maps to Word/WordParameter fields
+  columnOrder     Int      @map("column_order")
+  isRequired      Boolean  @default(false) @map("is_required")
+  isActive        Boolean  @default(true) @map("is_active")
+  dataType        String   @default("text") @map("data_type") // text, number, date, etc.
+  defaultValue    String?  @map("default_value")
+  validationRule  String?  @map("validation_rule") // JSON string for validation rules
+  helpText        String?  @map("help_text")
+  exampleValue    String?  @map("example_value")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  dictionary      Dictionary @relation(fields: [dictionaryId], references: [id], onDelete: Cascade)
+
+  @@unique([dictionaryId, columnOrder])
+  @@index([dictionaryId])
+  @@map("dictionary_column_definitions")
+}
+
+model ParameterDefinition {
+  id                String                @id @default(cuid())
+  parameterKey      String                @unique @map("parameter_key")
+  parameterName     String                @map("parameter_name")
+  parameterNameMaithili String?          @map("parameter_name_maithili")
+  parameterType     ParameterType         @map("parameter_type")
+  isMultilingual    Boolean               @default(false) @map("is_multilingual")
+  supportedLanguages Json?               @map("supported_languages") // Array of strings
+  isRequired        Boolean               @default(false) @map("is_required")
+  orderIndex        Int                   @map("order_index")
+  isActive          Boolean               @default(true) @map("is_active")
+  canEdit           ParameterEditPermission @default(ALL) @map("can_edit")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+
+  // Relations
+  wordParameters WordParameter[]
+
+  @@map("parameter_definitions")
+}
+
+model Word {
+  id              String      @id @default(cuid())
+  dictionaryId    String      @map("dictionary_id")
+  wordMaithili    String      @map("word_maithili")
+  wordRomanized   String?     @map("word_romanized")
+  pronunciation   String?
+  wordType        String?     @map("word_type")
+  parentWordId    String?     @map("parent_word_id")
+  isSubWord       Boolean     @default(false) @map("is_sub_word")
+  subWordOrder    Int?        @map("sub_word_order")
+  status          WordStatus  @default(DRAFT)
+  createdById     String?     @map("created_by")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  approvedAt      DateTime?   @map("approved_at")
+  approvedById    String?     @map("approved_by")
+  versionNumber   Int         @default(1) @map("version_number")
+  isConcise       Boolean     @default(false) @map("is_concise")
+  isPublished     Boolean     @default(false) @map("is_published")
+  viewCount       Int         @default(0) @map("view_count")
+  searchCount     Int         @default(0) @map("search_count")
+
+  // Relations
+  dictionary      Dictionary      @relation(fields: [dictionaryId], references: [id])
+  parentWord      Word?           @relation("SubWords", fields: [parentWordId], references: [id])
+  subWords        Word[]          @relation("SubWords")
+  contributor     User?           @relation("WordContributor", fields: [createdById], references: [id])
+  approver         User?          @relation("WordApprover", fields: [approvedById], references: [id])
+  parameters      WordParameter[]
+  relationships   WordRelationship[] @relation("SourceWord")
+  targetRelations WordRelationship[] @relation("TargetWord")
+  editSuggestions EditSuggestion[]
+  workflows       WordWorkflow[]
+  revisions       WordRevision[]
+  workAssignments WorkAssignment[]
+  wordTransfers   WordTransfer[]
+  favorites       UserFavorite[]
+  notes           UserNote[]
+  searchHistory   SearchHistory[]
+
+  @@index([dictionaryId])
+  @@index([wordMaithili])
+  @@index([wordRomanized])
+  @@index([status])
+  @@index([parentWordId])
+  @@map("words")
+}
+
+model WordParameter {
+  id                    String            @id @default(cuid())
+  wordId                String            @map("word_id")
+  parameterDefinitionId String            @map("parameter_definition_id")
+  parameterKey          String            @map("parameter_key")
+  language              String?
+  contentText           String?           @map("content_text")
+  contentJson           Json?             @map("content_json")
+  contentRichText       String?           @map("content_rich_text")
+  orderIndex            Int               @default(0) @map("order_index")
+  isPrimary             Boolean           @default(false) @map("is_primary")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  word                  Word              @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  parameterDefinition   ParameterDefinition @relation(fields: [parameterDefinitionId], references: [id])
+
+  @@index([wordId])
+  @@index([parameterKey])
+  @@map("word_parameters")
+}
+
+model WordRelationship {
+  id              String           @id @default(cuid())
+  sourceWordId    String           @map("source_word_id")
+  targetWordId    String           @map("target_word_id")
+  relationshipType RelationshipType @map("relationship_type")
+  relationshipNote String?        @map("relationship_note")
+  isBidirectional Boolean         @default(false) @map("is_bidirectional")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  sourceWord      Word             @relation("SourceWord", fields: [sourceWordId], references: [id], onDelete: Cascade)
+  targetWord      Word             @relation("TargetWord", fields: [targetWordId], references: [id], onDelete: Cascade)
+
+  @@index([sourceWordId])
+  @@index([targetWordId])
+  @@map("word_relationships")
+}
+
+model EditSuggestion {
+  id                  String              @id @default(cuid())
+  wordId              String?             @map("word_id")
+  dictionaryId       String               @map("dictionary_id")
+  suggestionType     EditSuggestionType  @map("suggestion_type")
+  email               String
+  phone               String
+  name                String?
+  suggestionData     Json                @map("suggestion_data")
+  parameterSuggestions Json?             @map("parameter_suggestions")
+  status              EditSuggestionStatus @default(PENDING)
+  reviewedById       String?             @map("reviewed_by")
+  reviewedAt         DateTime?           @map("reviewed_at")
+  reviewNotes         String?            @map("review_notes")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  // Relations
+  word                Word?              @relation(fields: [wordId], references: [id], onDelete: SetNull)
+  dictionary          Dictionary         @relation(fields: [dictionaryId], references: [id])
+  reviewer            User?              @relation(fields: [reviewedById], references: [id])
+
+  @@index([dictionaryId])
+  @@index([status])
+  @@index([wordId])
+  @@map("edit_suggestions")
+}
+
+model WordWorkflow {
+  id              String          @id @default(cuid())
+  wordId          String          @map("word_id")
+  currentStage    WorkflowStage  @map("current_stage")
+  assignedToId    String?         @map("assigned_to")
+  assignedById    String          @map("assigned_by")
+  status          WorkflowStatus  @default(PENDING)
+  comments        String?
+  returnedToStage WorkflowStage?  @map("returned_to_stage")
+  returnReason    String?         @map("return_reason")
+  priority        Priority        @default(MEDIUM)
+  dueDate         DateTime?       @map("due_date")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  completedAt     DateTime?       @map("completed_at")
+
+  // Relations
+  word            Word            @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  assignedTo      User?           @relation("WorkflowAssignee", fields: [assignedToId], references: [id])
+  assignedBy      User            @relation("WorkflowCreator", fields: [assignedById], references: [id])
+
+  @@index([wordId])
+  @@index([assignedToId])
+  @@index([status])
+  @@map("word_workflow")
+}
+
+model WordRevision {
+  id              String   @id @default(cuid())
+  wordId          String   @map("word_id")
+  revisionNumber  Int      @map("revision_number")
+  wordData        Json     @map("word_data")
+  parameterData   Json     @map("parameter_data")
+  revisedById     String   @map("revised_by")
+  revisionReason  String?  @map("revision_reason")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  word            Word     @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  revisedBy       User     @relation(fields: [revisedById], references: [id])
+
+  @@index([wordId])
+  @@map("word_revisions")
+}
+
+model WorkAssignment {
+  id              String          @id @default(cuid())
+  wordId          String          @map("word_id")
+  assignedToId    String          @map("assigned_to")
+  assignedById    String          @map("assigned_by")
+  assignmentType  AssignmentType @map("assignment_type")
+  priority        Priority        @default(MEDIUM)
+  dueDate         DateTime?       @map("due_date")
+  status          AssignmentStatus @default(PENDING)
+  notes           String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  word            Word            @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  assignedTo      User            @relation("AssignmentAssignee", fields: [assignedToId], references: [id])
+  assignedBy      User            @relation("AssignmentCreator", fields: [assignedById], references: [id])
+
+  @@index([wordId])
+  @@index([assignedToId])
+  @@index([status])
+  @@map("work_assignments")
+}
+
+model WordTransfer {
+  id              String          @id @default(cuid())
+  wordId          String          @map("word_id")
+  fromUserId      String          @map("from_user")
+  toUserId        String          @map("to_user")
+  transferReason  String?         @map("transfer_reason")
+  transferStage   WorkflowStage   @map("transfer_stage")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  word            Word            @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  fromUser        User            @relation("TransferFrom", fields: [fromUserId], references: [id])
+  toUser          User            @relation("TransferTo", fields: [toUserId], references: [id])
+
+  @@index([wordId])
+  @@map("word_transfers")
+}
+
+model SearchSuggestion {
+  id          String    @id @default(cuid())
+  queryText   String    @map("query_text")
+  dictionaryId String?  @map("dictionary_id")
+  suggestions Json      // Array of word IDs and metadata
+  hitCount    Int       @default(0) @map("hit_count")
+  lastUpdated DateTime  @updatedAt @map("last_updated")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  dictionary  Dictionary? @relation(fields: [dictionaryId], references: [id], onDelete: SetNull)
+
+  @@index([queryText])
+  @@index([dictionaryId])
+  @@map("search_suggestions")
+}
+
+model SearchHistory {
+  id          String    @id @default(cuid())
+  userId      String?   @map("user_id")
+  queryText   String    @map("query_text")
+  dictionaryId String?  @map("dictionary_id")
+  wordId      String?   @map("word_id")
+  ipAddress   String?   @map("ip_address")
+  userAgent   String?   @map("user_agent")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  dictionary  Dictionary? @relation(fields: [dictionaryId], references: [id], onDelete: SetNull)
+  word        Word?     @relation(fields: [wordId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([queryText])
+  @@index([createdAt])
+  @@map("search_history")
+}
+
+model PdfExport {
+  id                    String        @id @default(cuid())
+  exportType            ExportType    @map("export_type")
+  dictionaryId          String?      @map("dictionary_id")
+  wordIds               Json?        @map("word_ids") // Array of word IDs
+  volumeConfig          Json?        @map("volume_config")
+  includeCrossReferences Boolean     @default(true) @map("include_cross_references")
+  status                ExportStatus @default(PENDING)
+  fileUrl               String?      @map("file_url")
+  fileSize              Int?         @map("file_size")
+  pageCount             Int?         @map("page_count")
+  createdById           String       @map("created_by")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  completedAt           DateTime?    @map("completed_at")
+
+  // Relations
+  dictionary            Dictionary?  @relation(fields: [dictionaryId], references: [id], onDelete: SetNull)
+  createdBy             User         @relation(fields: [createdById], references: [id])
+
+  @@index([createdById])
+  @@index([status])
+  @@map("pdf_exports")
+}
+
+model AuditLog {
+  id          String     @id @default(cuid())
+  userId      String?    @map("user_id")
+  actionType  ActionType @map("action_type")
+  entityType  String     @map("entity_type")
+  entityId    String?    @map("entity_id")
+  changes     Json?
+  ipAddress   String?    @map("ip_address")
+  userAgent   String?    @map("user_agent")
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  // Relations
+  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model UserFavorite {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  wordId    String   @map("word_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word      Word     @relation(fields: [wordId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, wordId])
+  @@index([userId])
+  @@map("user_favorites")
+}
+
+model UserNote {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  wordId    String   @map("word_id")
+  noteText  String   @map("note_text")
+  isPrivate Boolean  @default(true) @map("is_private")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word      Word     @relation(fields: [wordId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([wordId])
+  @@map("user_notes")
+}
+
